@@ -152,8 +152,7 @@ fn create_fee_lifecycle_invoice(lifecycle: &FeeLifecycle) -> (BytesN<32>, u64) {
     (invoice_id, due_date)
 }
 
-fn assert_fee_settlement(
-    lifecycle: &FeeLifecycle,
+struct FeeSettlementExpectation {
     shares: u128,
     deposit: u128,
     face_value: u128,
@@ -162,28 +161,46 @@ fn assert_fee_settlement(
     lp_yield: u128,
     buyer_before: i128,
     treasury_before: i128,
-) {
+}
+
+fn assert_fee_settlement(lifecycle: &FeeLifecycle, expected: FeeSettlementExpectation) {
     let token = MockTokenClient::new(&lifecycle.env, &lifecycle.usdc_id);
     let lp_before_withdrawal = token.balance(&lifecycle.lp);
-    let returned = lifecycle.pool.withdraw(&lifecycle.lp, &shares);
-    assert_eq!(returned, deposit + lp_yield);
+    let returned = lifecycle.pool.withdraw(&lifecycle.lp, &expected.shares);
+    assert_eq!(returned, expected.deposit + expected.lp_yield);
     assert_eq!(
         token.balance(&lifecycle.lp) - lp_before_withdrawal,
         returned as i128
     );
     assert_eq!(
         token.balance(&lifecycle.buyer),
-        buyer_before - (face_value - refund) as i128
+        expected.buyer_before - (expected.face_value - expected.refund) as i128
     );
     assert_eq!(
-        token.balance(&lifecycle.treasury) - treasury_before,
-        protocol_cut as i128
+        token.balance(&lifecycle.treasury) - expected.treasury_before,
+        expected.protocol_cut as i128
     );
     assert_eq!(token.balance(&lifecycle.pool_id), 0);
     // The issuer's original 98% advance remains in escrow; the 100% face-value
     // repayment is routed back to the pool, so this precisely accounts for the
     // escrow's balance without affecting LP yield or protocol-fee accounting.
     assert_eq!(token.balance(&lifecycle.escrow_id), 9_800_000_000);
+}
+
+fn expected_repayment_split(invoice: &trusttrove_invoice::Invoice, repaid_at: u64) -> (u128, u128) {
+    let funded_at = invoice
+        .funded_at
+        .expect("funded invoice should record its funding timestamp");
+    let discount = invoice.face_value - invoice.funded_amount;
+    let term = invoice.due_date - funded_at;
+    let elapsed = repaid_at - funded_at;
+    let earned_by_pool = if term == 0 {
+        discount
+    } else {
+        discount * (elapsed as u128) / (term as u128)
+    };
+    let refund_to_buyer = discount - earned_by_pool;
+    (earned_by_pool, refund_to_buyer)
 }
 
 // --------------- Mock Agent Registry ---------------
@@ -366,35 +383,42 @@ fn test_fee_bearing_early_repayment_with_lp_withdrawal() {
     let lifecycle = setup_fee_lifecycle();
     let deposit = 12_000_000_000u128;
     let shares = lifecycle.pool.deposit(&lifecycle.lp, &deposit);
-    lifecycle.pool.set_protocol_fee(&1000, &lifecycle.treasury);
+    let fee_bps = 1000u32;
+    lifecycle
+        .pool
+        .set_protocol_fee(&fee_bps, &lifecycle.treasury);
     let (invoice_id, _) = create_fee_lifecycle_invoice(&lifecycle);
 
     let token = MockTokenClient::new(&lifecycle.env, &lifecycle.usdc_id);
     let buyer_before = token.balance(&lifecycle.buyer);
     let treasury_before = token.balance(&lifecycle.treasury);
-    let face_value = 10_000_000_000u128;
-    let elapsed = 15 * 86400;
-    lifecycle
-        .env
-        .ledger()
-        .set_timestamp(lifecycle.env.ledger().timestamp() + elapsed);
+    let invoice = lifecycle.invoice.get(&invoice_id);
+    let funded_at = invoice.funded_at.unwrap();
+    let term = invoice.due_date - funded_at;
+    let repaid_at = funded_at + term / 2;
+    let (gross_yield, refund) = expected_repayment_split(&invoice, repaid_at);
+    assert!(
+        refund > 0,
+        "early repayment should return part of the discount"
+    );
+    lifecycle.env.ledger().set_timestamp(repaid_at);
 
     assert!(lifecycle.invoice.repay_early(&invoice_id));
 
-    let gross_yield = 100_000_000u128;
-    let refund = 100_000_000u128;
-    let protocol_cut = gross_yield * 1000 / 10_000;
+    let protocol_cut = gross_yield * fee_bps as u128 / 10_000;
     let lp_yield = gross_yield - protocol_cut;
     assert_fee_settlement(
         &lifecycle,
-        shares,
-        deposit,
-        face_value,
-        refund,
-        protocol_cut,
-        lp_yield,
-        buyer_before,
-        treasury_before,
+        FeeSettlementExpectation {
+            shares,
+            deposit,
+            face_value: invoice.face_value,
+            refund,
+            protocol_cut,
+            lp_yield,
+            buyer_before,
+            treasury_before,
+        },
     );
 }
 
@@ -403,31 +427,36 @@ fn test_fee_bearing_full_term_repayment_with_lp_withdrawal() {
     let lifecycle = setup_fee_lifecycle();
     let deposit = 12_000_000_000u128;
     let shares = lifecycle.pool.deposit(&lifecycle.lp, &deposit);
-    lifecycle.pool.set_protocol_fee(&1000, &lifecycle.treasury);
+    let fee_bps = 1000u32;
+    lifecycle
+        .pool
+        .set_protocol_fee(&fee_bps, &lifecycle.treasury);
     let (invoice_id, due_date) = create_fee_lifecycle_invoice(&lifecycle);
 
     let token = MockTokenClient::new(&lifecycle.env, &lifecycle.usdc_id);
     let buyer_before = token.balance(&lifecycle.buyer);
     let treasury_before = token.balance(&lifecycle.treasury);
-    let face_value = 10_000_000_000u128;
     lifecycle.env.ledger().set_timestamp(due_date);
+    let invoice = lifecycle.invoice.get(&invoice_id);
+    let (gross_yield, refund) = expected_repayment_split(&invoice, due_date);
+    assert_eq!(refund, 0, "full-term repayment should return no discount");
 
     assert!(lifecycle.invoice.repay(&invoice_id));
 
-    let gross_yield = 200_000_000u128;
-    let refund = 0u128;
-    let protocol_cut = gross_yield * 1000 / 10_000;
+    let protocol_cut = gross_yield * fee_bps as u128 / 10_000;
     let lp_yield = gross_yield - protocol_cut;
     assert_fee_settlement(
         &lifecycle,
-        shares,
-        deposit,
-        face_value,
-        refund,
-        protocol_cut,
-        lp_yield,
-        buyer_before,
-        treasury_before,
+        FeeSettlementExpectation {
+            shares,
+            deposit,
+            face_value: invoice.face_value,
+            refund,
+            protocol_cut,
+            lp_yield,
+            buyer_before,
+            treasury_before,
+        },
     );
 }
 
