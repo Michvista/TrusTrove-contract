@@ -369,7 +369,8 @@ impl EscrowContract {
             .get(&key)
             .unwrap_or_else(|| panic_with_error!(&env, EscrowError::NotFound));
 
-        if issuer != record.issuer {
+        let recorded_issuer = record.issuer.clone();
+        if issuer != recorded_issuer {
             panic_with_error!(&env, EscrowError::InvalidRecipient);
         }
 
@@ -380,7 +381,9 @@ impl EscrowContract {
         // invalid token amount.
         let amount = i128::try_from(record.amount)
             .unwrap_or_else(|_| panic_with_error!(&env, EscrowError::InvalidAmount));
-        usdc.transfer(&env.current_contract_address(), &issuer, &amount);
+        // Pay from the locked invoice record, never from the caller-supplied
+        // address after it has merely passed validation.
+        usdc.transfer(&env.current_contract_address(), &recorded_issuer, &amount);
 
         Self::append_history(
             &env,
@@ -403,7 +406,7 @@ impl EscrowContract {
             .persistent()
             .extend_ttl(&released_key, TTL_THRESHOLD, TTL_EXTEND_TO);
         Self::extend_instance_ttl(&env);
-        events::released_to_issuer(&env, &invoice_id, &issuer, record.amount);
+        events::released_to_issuer(&env, &invoice_id, &recorded_issuer, record.amount);
         true
     }
 

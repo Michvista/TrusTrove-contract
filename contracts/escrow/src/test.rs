@@ -708,6 +708,27 @@ fn test_release_to_issuer_sends_correct_amount() {
     assert_eq!(token.balance(&issuer) - issuer_before, amount as i128);
 }
 
+#[test]
+fn test_release_to_issuer_rejects_redirect_and_pays_recorded_issuer() {
+    let (env, client, _admin, _pool, issuer, usdc_id) = setup();
+    let invoice_id = generate_invoice_id(&env, 82);
+    let amount = 1_234_567u128;
+    let other = Address::generate(&env);
+    let token = MockTokenClient::new(&env, &usdc_id);
+
+    client.lock(&invoice_id, &amount, &issuer);
+    let issuer_before = token.balance(&issuer);
+    let other_before = token.balance(&other);
+
+    assert!(client.try_release_to_issuer(&invoice_id, &other).is_err());
+    assert_eq!(client.get_locked(&invoice_id), amount);
+    assert_eq!(token.balance(&other), other_before);
+
+    assert!(client.release_to_issuer(&invoice_id, &issuer));
+    assert_eq!(token.balance(&issuer) - issuer_before, amount as i128);
+    assert_eq!(client.get_locked(&invoice_id), 0);
+}
+
 /// #1007: `release_to_issuer` transfers to the issuer before removing the
 /// lock record, so a rejected token transfer must leave the custody state
 /// untouched — lock record and history present, no release event, issuer
