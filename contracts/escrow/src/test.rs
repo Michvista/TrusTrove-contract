@@ -1142,15 +1142,65 @@ fn test_release_to_pool_fails_zero_repayment() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #5)")]
 fn test_release_to_pool_fails_amount_exceeds_i128_max() {
-    let (env, client, _admin, _pool, issuer, _usdc_id) = setup();
+    let (env, client, _admin, pool, issuer, usdc_id) = setup();
     let invoice_id = generate_invoice_id(&env, 2);
     let amount: u128 = 1_000_000_000;
 
     client.lock(&invoice_id, &amount, &issuer);
     let repayment_amount = i128::MAX as u128 + 1;
-    client.release_to_pool(&invoice_id, &repayment_amount);
+    let pool_before = get_balance(&env, &usdc_id, &pool);
+    let escrow_before = get_balance(&env, &usdc_id, &client.address);
+    let history_before = client.get_history(&invoice_id).len();
+    let events_before = env.events().all().len();
+
+    assert!(client
+        .try_release_to_pool(&invoice_id, &repayment_amount)
+        .is_err());
+    assert_eq!(client.get_locked(&invoice_id), amount);
+    assert_eq!(get_balance(&env, &usdc_id, &pool), pool_before);
+    assert_eq!(get_balance(&env, &usdc_id, &client.address), escrow_before);
+    assert_eq!(client.get_history(&invoice_id).len(), history_before);
+    assert_eq!(env.events().all().len(), events_before);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #5)")]
+fn test_release_to_pool_overflow_uses_typed_invalid_amount_error() {
+    let (env, client, _admin, _pool, issuer, _usdc_id) = setup();
+    let invoice_id = generate_invoice_id(&env, 3);
+    client.lock(&invoice_id, &1_000_000_000, &issuer);
+    client.release_to_pool(&invoice_id, &(i128::MAX as u128 + 1));
+}
+
+#[test]
+fn test_release_to_pool_succeeds_at_i128_max() {
+    let (env, client, _admin, pool, issuer, usdc_id) = setup();
+    let invoice_id = generate_invoice_id(&env, 4);
+    let locked = 100u128;
+    client.lock(&invoice_id, &locked, &issuer);
+
+    // Keep the mock pool balance at zero so adding i128::MAX does not overflow
+    // the test token's signed balance arithmetic.
+    let pool_balance = get_balance(&env, &usdc_id, &pool);
+    env.as_contract(&usdc_id, || {
+        env.storage()
+            .persistent()
+            .set(&BalanceKey(pool.clone()), &(-pool_balance));
+    });
+    let escrow_before = get_balance(&env, &usdc_id, &client.address);
+    let max_repayment = i128::MAX as u128;
+
+    assert!(client.release_to_pool(&invoice_id, &max_repayment));
+    assert_eq!(
+        get_balance(&env, &usdc_id, &pool) - (-pool_balance),
+        i128::MAX
+    );
+    assert_eq!(
+        get_balance(&env, &usdc_id, &client.address),
+        escrow_before - i128::MAX
+    );
+    assert_eq!(client.get_locked(&invoice_id), 0);
 }
 
 // #1004: a partial repayment must leave the residual principal locked, keep
