@@ -1235,11 +1235,20 @@ fn test_repeated_partial_releases_converge_and_preserve_history_order() {
 
     let history_before_final = client.get_history(&invoice_id);
     assert_eq!(history_before_final.len(), 3);
-    assert_eq!(history_before_final.get(0).unwrap().action, EscrowAction::Locked);
+    assert_eq!(
+        history_before_final.get(0).unwrap().action,
+        EscrowAction::Locked
+    );
     assert_eq!(history_before_final.get(0).unwrap().amount, original);
-    assert_eq!(history_before_final.get(1).unwrap().action, EscrowAction::ReleasedToPool);
+    assert_eq!(
+        history_before_final.get(1).unwrap().action,
+        EscrowAction::ReleasedToPool
+    );
     assert_eq!(history_before_final.get(1).unwrap().amount, first);
-    assert_eq!(history_before_final.get(2).unwrap().action, EscrowAction::ReleasedToPool);
+    assert_eq!(
+        history_before_final.get(2).unwrap().action,
+        EscrowAction::ReleasedToPool
+    );
     assert_eq!(history_before_final.get(2).unwrap().amount, second);
 
     assert!(client.release_to_pool(&invoice_id, &final_release));
