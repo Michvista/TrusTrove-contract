@@ -1340,7 +1340,6 @@ impl PoolContract {
         // and validates the release recipient against that record; it must not
         // call back through this active pool frame to resolve the invoice again.
         let canonical_issuer = ctx.issuer;
-        let issuer = canonical_issuer.clone();
         let registry_id = Self::registry_contract(&env);
         let mut args = Vec::new(&env);
         args.push_back(canonical_issuer.clone().into_val(&env));
