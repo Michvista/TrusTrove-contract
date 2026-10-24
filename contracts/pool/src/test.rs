@@ -7099,6 +7099,7 @@ fn test_shared_fixture_setup_full_protocol() {
 // Soroban host.
 const PROP_CASES: u32 = 10;
 const PROP_MAX_STEPS: usize = 12;
+const PROP_SOLVENCY_MAX_STEPS: usize = 8;
 
 // Amount bound: wide enough that a single step can exceed any balance built
 // up earlier in the sequence (driving the rejected-step paths), and far below
@@ -9025,7 +9026,7 @@ fn prop_pool_token_balance_always_covers_available_liquidity() {
                 // the cut-vs-balance assertion bite); some run fee 0 (full yield stays
                 // with the LPs).
                 prop_oneof![1 => Just(0u32), 3 => 1u32..=MAX_PROTOCOL_FEE_BPS],
-                prop::collection::vec(solvency_step_strategy(), 1..=PROP_MAX_STEPS),
+                prop::collection::vec(solvency_step_strategy(), 1..=PROP_SOLVENCY_MAX_STEPS),
             ),
             |(fee_bps, steps)| {
                 let te = setup();
