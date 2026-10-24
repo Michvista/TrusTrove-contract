@@ -419,7 +419,7 @@ cap. Both values are expressed in basis points (`10_000` = 100%).
 | `topic[0]` | `Symbol` | `"max_utilization_updated"` |
 | **Data** | `(u32, u32)` | `(old_cap_bps, new_cap_bps)` |
 
-**Emitted by:** `set_max_utilization()` in `contracts/pool/src/lib.rs`  
+**Emitted by:** `set_max_utilization()` in `contracts/pool/src/lib.rs`<br>
 **Source:** `contracts/pool/src/events.rs`
 
 ---
