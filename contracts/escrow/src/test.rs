@@ -689,12 +689,14 @@ fn test_lock_only_callable_by_pool() {
 
 #[test]
 fn test_release_to_issuer_sends_correct_amount() {
-    let (env, client, _admin, _pool, issuer, _usdc_id) = setup();
+    let (env, client, _admin, _pool, issuer, usdc_id) = setup();
     let invoice_id = generate_invoice_id(&env, 5);
     let amount: u128 = 1_000_000_000;
+    let token = MockTokenClient::new(&env, &usdc_id);
 
     // Lock funds first
     client.lock(&invoice_id, &amount, &issuer);
+    let issuer_before = token.balance(&issuer);
 
     // Release to issuer
     let result = client.release_to_issuer(&invoice_id, &issuer);
@@ -703,6 +705,7 @@ fn test_release_to_issuer_sends_correct_amount() {
     // Verify record was removed
     let locked = client.get_locked(&invoice_id);
     assert_eq!(locked, 0);
+    assert_eq!(token.balance(&issuer) - issuer_before, amount as i128);
 }
 
 /// #1007: `release_to_issuer` transfers to the issuer before removing the

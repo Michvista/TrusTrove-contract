@@ -1335,6 +1335,10 @@ impl PoolContract {
             panic_with_error!(&env, PoolError::InvoiceNotListed);
         }
 
+        // Keep the canonical issuer from the invoice context for both escrow
+        // callbacks. Escrow records this value during the pool-authorized lock
+        // and validates the release recipient against that record; it must not
+        // call back through this active pool frame to resolve the invoice again.
         let issuer = ctx.issuer.clone();
         let registry_id = Self::registry_contract(&env);
         let mut args = Vec::new(&env);
